@@ -1,5 +1,3 @@
-import os
-import httplib2
 import re
 import argparse
 from google.oauth2 import service_account
@@ -18,8 +16,6 @@ def get_spreadsheet_id_from_url(url):
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
     return match.group(1) if match else None
 
-# Get the spreadsheet ID from the provided URL
-#gspreadsheet_url = "https://docs.google.com/spreadsheets/d/1VjhhUJ6D3zG3JJf5vW6gtweLjgDeKufERFXwPb7xTxU"
 spreadsheet_id = "AAAAAAAAAA"
 
 SOURCE_TAB_NAME = 'Citas'
