@@ -293,7 +293,7 @@ def create_and_copy_rows_to_tabs(data, fee):
             print(f"An error occurred: {error}")
         
 
-def main(url, fee, iss):
+def main(url, fee, iss, ruts):
     global spreadsheet_id
     spreadsheet_id = get_spreadsheet_id_from_url(url)
     if iss:
@@ -309,6 +309,7 @@ if __name__ == '__main__':
     parser.add_argument('--url', type=str, required=True, help='The URL to process.')
     parser.add_argument('--fee', type=float, required=True, help='The fee to process.')
     parser.add_argument('--regenerate-list', action='store_true', help='Regenerate issuer list, yes/no')
-    
+    parser.add_argument('--ruts-empresa', nargs='+', help='RUTs de empresa')
+
     args = parser.parse_args()
-    main(args.url, args.fee, args.regenerate_list)
+    main(args.url, args.fee, args.regenerate_list, args.ruts_empresa)
