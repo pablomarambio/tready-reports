@@ -1,5 +1,6 @@
 import re
 import argparse
+import copy
 from google.oauth2 import service_account
 from googleapiclient import discovery
 from googleapiclient.errors import HttpError
@@ -214,7 +215,7 @@ def unique_issuers_and_ruts(sheet_name):
         valueInputOption='RAW', body=body).execute()
 
     
-def create_and_copy_rows_to_tabs(data, fee):
+def create_and_copy_rows_to_tabs(data, fee, first_provider):
     data[0].append("id-vlookup1")
     data[0].append("id-boleta")
     data[0].append("largo-rut")
@@ -223,15 +224,17 @@ def create_and_copy_rows_to_tabs(data, fee):
     data[0].append("monto-servicios")
     data[0].append("valor")
     unique_values = sorted(list(set(row[3] for row in data[1:])))
-    print(unique_values)
-    tabs = 1
+    
+    process_all = (first_provider is None)
     for value in unique_values:
-        #if tabs > 1:
-            #break
         if not value:
             continue
+        if not process_all:
+            process_all = (value == first_provider)
+            if not process_all:
+                print(f"skipping {value}")
+                continue
         print(f"trabajando en '{value}'")
-        tabs = tabs + 1
         # Create a new tab
         create_tab_request = {
             "addSheet": {
@@ -255,7 +258,7 @@ def create_and_copy_rows_to_tabs(data, fee):
 
         print(f"{value} tiene {len(filtered_rows)} filas")
 
-        function1 = "=IF(L@@<>\"\"; CONCAT(L@@;CONCAT(\"-\";VLOOKUP(D@@;Emisores!$A$1:$B$30;2;FALSE)));\"\")"
+        function1 = "=IF(L@@<>\"\"; CONCAT(L@@;CONCAT(\"-\";VLOOKUP(D@@;Emisores!$A$1:$B$100;2;FALSE)));\"\")"
         function2 = "=IF(M@@<>\"\"; HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE));\"\")"
         function3 = "=IF(M@@<>\"\"; LEN(VLOOKUP(M@@;DTEs!A:L;6;FALSE))-2;\"\")"
         function4 = "=IF(M@@<>\"\"; INT(LEFT(RIGHT(N@@;LEN(N@@)-O@@);5));\"\")"
@@ -291,25 +294,155 @@ def create_and_copy_rows_to_tabs(data, fee):
             apply_conditional_formatting(value, sheet_id, 'S', len(filtered_rows), fee)  # Apply conditional formatting to column 'S'
         except HttpError as error:
             print(f"An error occurred: {error}")
-        
+    
+def create_company_tabs(ruts):
 
-def main(url, fee, iss, ruts):
+    for rut_and_location in ruts:
+        if not rut_and_location:
+            continue
+        rut, location = rut_and_location.split("/")
+        tab_name = f"Empresa-{rut}"
+        print(f"trabajando en '{rut}'")
+        # Create a new tab
+        create_tab_request = {
+            "addSheet": {
+                "properties": {
+                    "title": tab_name
+                }
+            }
+        }
+        try:
+            sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [create_tab_request]}).execute()
+        except HttpError as error:
+            print(f"Could not create tab {tab_name}")
+            continue
+
+        sheet_id = get_sheet_id(tab_name)
+
+        update_cells_request = {
+            "requests": [
+                {
+                    "updateCells": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 1
+                        },
+                        "rows": [
+                            {
+                                "values": [
+                                    {
+                                        "userEnteredValue": {
+                                            "stringValue": "id-payment"
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        "fields": "userEnteredValue"
+                    }
+                },
+                {
+                    "updateCells": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 2,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 1
+                        },
+                        "rows": [
+                            {
+                                "values": [
+                                    {
+                                        "userEnteredValue": {
+                                            "formulaValue": f"=UNIQUE(FILTER(Citas!L2:L; Citas!B2:B=\"{location}\"))"
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        "fields": "userEnteredValue"
+                    }
+                }
+            ]
+        }
+
+        try:
+            sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=update_cells_request).execute()
+        except HttpError as error:
+            print(f"An error occurred: {error}")
+
+        
+        # Define the range in which you want to search for the last non-empty cell
+        range_ = f'{tab_name}!A:A'
+
+        # Get all values in column 'A'
+        response = sheets_api.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_).execute()
+        values = response.get('values', [])
+        
+        # Find the last non-empty cell in column 'A'
+        last_non_empty_cell = len(values)
+
+        # Insert "ASD" as the header of the second column
+        sheets_api.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f'{tab_name}!B1:F1',
+            valueInputOption='USER_ENTERED',
+            body={'values': [[
+                'total', 
+                'id-vlookup',
+                'monto-boleta',
+                'dte'
+            ]]}
+        ).execute()
+
+
+        # Prepare the formula for each cell in column 'B'
+        values = [
+            [
+                f'=SUMIF(Citas!L:L;A{str(i+2)};Citas!F:F)',
+                f'=CONCAT($A{str(i+2)};"-{rut}")',
+                f'=SUMIF(DTEs!$A:$A;C{str(i+2)};DTEs!$J:$J)',
+                f'=VLOOKUP(C{str(i+2)};DTEs!A:L;12;FALSE)',
+            ] for i in range(last_non_empty_cell-1)
+        ]
+
+        # Insert the formulas starting from B2 until the last cell in column 'B' that has a corresponding value in column 'A'
+        sheets_api.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f'{tab_name}!B2:F' + str(last_non_empty_cell+1),
+            valueInputOption='USER_ENTERED',
+            body={'values': values}
+        ).execute()
+
+def main(url, fee, report_bhe, first_provider, iss, ruts):
     global spreadsheet_id
     spreadsheet_id = get_spreadsheet_id_from_url(url)
     if iss:
         unique_issuers_and_ruts('DTEs')
+
     data = get_data_from_source_tab()
-    if data:
-        create_and_copy_rows_to_tabs(data, fee)
-    else:
-        print("No data found in the source tab.")
+
+    if report_bhe:
+        if data:
+            create_and_copy_rows_to_tabs(copy.deepcopy(data), fee, first_provider)
+        else:
+            print("No data found in the source tab.")
+
+    if ruts:
+        create_company_tabs(ruts)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process URL and fee.')
     parser.add_argument('--url', type=str, required=True, help='The URL to process.')
     parser.add_argument('--fee', type=float, required=True, help='The fee to process.')
-    parser.add_argument('--regenerate-list', action='store_true', help='Regenerate issuer list, yes/no')
-    parser.add_argument('--ruts-empresa', nargs='+', help='RUTs de empresa')
+    parser.add_argument('--discover-issuers', action='store_true', help='Regenerate issuer list')
+    parser.add_argument('--ruts-empresa', nargs='+', help='RUTs de empresa y Locations en formato RUT/Location')
+    parser.add_argument('--report-bhe', action='store_true', help='Create report for providers')
+    parser.add_argument('--first-provider', type=str, help='Start with this provider')
 
     args = parser.parse_args()
-    main(args.url, args.fee, args.regenerate_list, args.ruts_empresa)
+    main(args.url, args.fee, args.report_bhe, args.first_provider, args.regenerate_list, args.ruts_empresa)
