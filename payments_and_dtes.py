@@ -365,7 +365,7 @@ def create_company_tabs(ruts):
                                 "values": [
                                     {
                                         "userEnteredValue": {
-                                            "formulaValue": f"=UNIQUE(FILTER(Citas!L2:L; Citas!B2:B=\"{location}\"))"
+                                            "formulaValue": f"=UNIQUE(FILTER(Citas!A2:A; Citas!C2:C=\"{location}\"))"
                                         }
                                     }
                                 ]
@@ -401,10 +401,10 @@ def create_company_tabs(ruts):
         # Prepare the formula for each cell in column 'B'
         values = [
             [
-                f'=SUMIF(Citas!L:L;A{str(i+2)};Citas!F:F)',
+                f'=SUMIF(Citas!A:A;A{str(i+2)};Citas!F:F)',
                 f'=CONCAT($A{str(i+2)};"-{rut}")',
                 f'=SUMIF(DTEs!$A:$A;C{str(i+2)};DTEs!$J:$J)',
-                f'=VLOOKUP(C{str(i+2)};DTEs!A:L;12;FALSE)',
+                f'=IFERROR(VLOOKUP(C{str(i+2)};DTEs!A:L;12;FALSE);VLOOKUP(CONCAT(CONCAT(A{str(i+2)};"-");\"{location}\");Errores!A:F;6))',
             ] for i in range(last_non_empty_cell-1)
         ]
 
@@ -548,7 +548,7 @@ def query_errores(company_id, date_from, date_to):
         error
     from all_errors
     where rn = 1
-    order by 2, 3;"""
+    order by 1, 3;"""
 
 def connect_and_fetch_data(query, hostname, username, password, database):
     conn = psycopg2.connect(host=hostname, user=username, password=password, dbname=database)
@@ -607,16 +607,16 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generador de reportes de Tready')
-    parser.add_argument('--url', type=str, required=True, help='The URL to process.')
-    parser.add_argument('--cruce', action='store_true', help='Cruce general')
-    parser.add_argument('--fee', type=float, help='The fee to process.')
-    parser.add_argument('--discover-issuers', action='store_true', help='Regenerate issuer list')
-    parser.add_argument('--ruts-empresa', nargs='+', help='RUTs de empresa y Locations en formato RUT/Location')
-    parser.add_argument('--report-bhe', action='store_true', help='Create report for providers')
-    parser.add_argument('--first-provider', type=str, help='Start with this provider')
-    parser.add_argument('--company-id', type=str, help='Company ID')
-    parser.add_argument('--date-from', type=str, help='Extracción desde en formato yyyyMMdd')
-    parser.add_argument('--date-to', type=str, help='Extracción hasta (no inclusivo) en formato yyyyMMdd')
+    parser.add_argument('-u', '--url', type=str, required=True, help='The URL to process.')
+    parser.add_argument('-c', '--cruce', action='store_true', help='Cruce general')
+    parser.add_argument('-f', '--fee', type=float, help='The fee to process.')
+    parser.add_argument('-i', '--discover-issuers', action='store_true', help='Regenerate issuer list')
+    parser.add_argument('-re', '--ruts-empresa', nargs='+', help='RUTs de empresa y Locations en formato RUT/Location')
+    parser.add_argument('-bh', '--report-bhe', action='store_true', help='Create report for providers')
+    parser.add_argument('-s', '--first-provider', type=str, help='Start with this provider')
+    parser.add_argument('-ci', '--company-id', type=str, help='Company ID')
+    parser.add_argument('-f', '--date-from', type=str, help='Extracción desde en formato yyyyMMdd')
+    parser.add_argument('-t' '--date-to', type=str, help='Extracción hasta (no inclusivo) en formato yyyyMMdd')
 
     args = parser.parse_args()
     main(args.company_id, args.date_from, args.date_to, args.url, args.cruce, args.fee, args.report_bhe, args.first_provider, args.discover_issuers, args.ruts_empresa)
