@@ -1,6 +1,9 @@
 import re
 import argparse
 import copy
+import psycopg2
+import pandas as pd
+import json
 from google.oauth2 import service_account
 from googleapiclient import discovery
 from googleapiclient.errors import HttpError
@@ -171,7 +174,7 @@ def get_sheet_id(sheet_name):
     return sheet_id
 
 def unique_issuers_and_ruts(sheet_name):
-    range_name = f'{sheet_name}!F:G'
+    range_name = f'{sheet_name}!F2:G'
     result = sheets_api.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id, range=range_name).execute()
     rows = result.get('values', [])
@@ -190,18 +193,7 @@ def unique_issuers_and_ruts(sheet_name):
 
     # Create a new tab
     new_sheet_title = 'Emisores'
-    new_sheet = {
-        'requests': [
-            {
-                'addSheet': {
-                    'properties': {
-                        'title': new_sheet_title
-                    }
-                }
-            }
-        ]
-    }
-    sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=new_sheet).execute()
+    create_tab(new_sheet_title, freeze_headers=False)
 
     # Write the data to the new tab
     new_range = f'{new_sheet_title}!A:B'
@@ -223,7 +215,7 @@ def create_and_copy_rows_to_tabs(data, fee, first_provider):
     data[0].append("monto-boleta")
     data[0].append("monto-servicios")
     data[0].append("valor")
-    unique_values = sorted(list(set(row[3] for row in data[1:])))
+    unique_values = sorted(list(set(row[4] for row in data[1:])))
     
     process_all = (first_provider is None)
     for value in unique_values:
@@ -235,35 +227,19 @@ def create_and_copy_rows_to_tabs(data, fee, first_provider):
                 print(f"skipping {value}")
                 continue
         print(f"trabajando en '{value}'")
-        # Create a new tab
-        create_tab_request = {
-            "addSheet": {
-                "properties": {
-                    "title": value
-                }
-            }
-        }
-        try:
-            sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [create_tab_request]}).execute()
-        except HttpError as error:
-            print(f"Could not create tab {value}")
-            continue
-        
-        sheet_id = get_sheet_id(value)
+        sheet_id = create_tab(value)
 
         # Copy rows with the corresponding value in column B to the new tab
-        filtered_rows = [data[0]] + [row for row in data[1:] if row[3] == value]
+        filtered_rows = [data[0]] + [row for row in data[1:] if row[4] == value]
         if not filtered_rows:
             continue
 
-        print(f"{value} tiene {len(filtered_rows)} filas")
-
-        function1 = "=IF(L@@<>\"\"; CONCAT(L@@;CONCAT(\"-\";VLOOKUP(D@@;Emisores!$A$1:$B$100;2;FALSE)));\"\")"
+        function1 = "=IF(A@@<>\"\"; CONCAT(A@@;CONCAT(\"-\";VLOOKUP(E@@;Emisores!$A$1:$B$100;2;FALSE)));\"\")"
         function2 = "=IF(M@@<>\"\"; HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE));\"\")"
         function3 = "=IF(M@@<>\"\"; LEN(VLOOKUP(M@@;DTEs!A:L;6;FALSE))-2;\"\")"
         function4 = "=IF(M@@<>\"\"; INT(LEFT(RIGHT(N@@;LEN(N@@)-O@@);5));\"\")"
         function5 = "=IF(M@@<>\"\"; VLOOKUP(M@@;DTEs!A:L;10;FALSE);\"\")"
-        function6 = "=IF(M@@<>\"\"; CEILING(SUMIFS(F:F;L:L;L@@));\"\")"
+        function6 = "=IF(M@@<>\"\"; CEILING(SUMIFS(G:G;A:A;A@@));\"\")"
         function7 = "=IFERROR(Q@@/R@@;\"\")"
         ri = 2
         function1_column = 'M'
@@ -295,6 +271,50 @@ def create_and_copy_rows_to_tabs(data, fee, first_provider):
         except HttpError as error:
             print(f"An error occurred: {error}")
     
+def find_column_height(tab_name, column):
+
+        # Define the range in which you want to search for the last non-empty cell
+        range_ = f'{tab_name}!{column}:{column}'
+
+        # Get all values in column 'A'
+        response = sheets_api.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_).execute()
+        values = response.get('values', [])
+        
+        # Find the last non-empty cell in column 'A'
+        return len(values)
+
+def create_tab(tab_name, freeze_headers=True):
+    
+    create_tab_request = {
+        "addSheet": {
+            "properties": {
+                "title": tab_name
+            }
+        }
+    }
+
+    try:
+        sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [create_tab_request]}).execute()
+        sheet_id = get_sheet_id(tab_name)
+        if freeze_headers:
+            freeze_request = {
+                'updateSheetProperties': {
+                    'properties': {
+                        'sheetId': sheet_id,
+                        'gridProperties': {
+                            'frozenRowCount': 1
+                        }
+                    },
+                    'fields': 'gridProperties.frozenRowCount'
+                }
+            }
+            sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [freeze_request]}).execute()
+        return sheet_id
+    except HttpError as error:
+        print(f"Could not create tab {tab_name}")
+    return None
+        
+
 def create_company_tabs(ruts):
 
     for rut_and_location in ruts:
@@ -303,21 +323,8 @@ def create_company_tabs(ruts):
         rut, location = rut_and_location.split("/")
         tab_name = f"Empresa-{rut}"
         print(f"trabajando en '{rut}'")
-        # Create a new tab
-        create_tab_request = {
-            "addSheet": {
-                "properties": {
-                    "title": tab_name
-                }
-            }
-        }
-        try:
-            sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [create_tab_request]}).execute()
-        except HttpError as error:
-            print(f"Could not create tab {tab_name}")
-            continue
 
-        sheet_id = get_sheet_id(tab_name)
+        sheet_id = create_tab(tab_name)
 
         update_cells_request = {
             "requests": [
@@ -375,16 +382,7 @@ def create_company_tabs(ruts):
         except HttpError as error:
             print(f"An error occurred: {error}")
 
-        
-        # Define the range in which you want to search for the last non-empty cell
-        range_ = f'{tab_name}!A:A'
-
-        # Get all values in column 'A'
-        response = sheets_api.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_).execute()
-        values = response.get('values', [])
-        
-        # Find the last non-empty cell in column 'A'
-        last_non_empty_cell = len(values)
+        last_non_empty_cell = find_column_height(tab_name, 'A')
 
         # Insert "ASD" as the header of the second column
         sheets_api.spreadsheets().values().update(
@@ -418,13 +416,152 @@ def create_company_tabs(ruts):
             body={'values': values}
         ).execute()
 
-def main(url, fee, report_bhe, first_provider, iss, ruts):
+    
+def create_cruce_basico():
+
+    tab_name = f"Cruce"
+    print(f"trabajando en '{tab_name}'")
+    create_tab(tab_name)
+
+    # Insert payment ids
+    sheets_api.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f'{tab_name}!A1:A2',
+        valueInputOption='USER_ENTERED',
+        body={'values': [[
+            'payment_id'
+        ], ['=UNIQUE(Citas!A2:A)']]}
+    ).execute()
+
+    payment_id_count = find_column_height(tab_name, 'A') - 1
+
+    sheets_api.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f'{tab_name}!B1:I1',
+        valueInputOption='USER_ENTERED',
+        body={'values': [[
+            'location', 
+            'provider-count',
+            'BHE count',
+            'BA count',
+            'Falta BHE',
+            'Falta BA',
+            'Falta DTE',
+            'Error'
+        ]]}
+    ).execute()
+
+
+    values = [
+        [
+            f'=VLOOKUP(A{str(i+2)};Citas!A:L;3;FALSE)',
+            f'=COUNTUNIQUEIFS(Citas!D:D;Citas!A:A;A{str(i+2)})',
+            f'=COUNTIFs(DTEs!B:B;A{str(i+2)};DTEs!E:E;"boleta_honorarios")',
+            f'=COUNTIFs(DTEs!B:B;A{str(i+2)};DTEs!E:E;"boleta")',
+            f'=C{str(i+2)}>D{str(i+2)}',
+            f'=AND(C{str(i+2)}>0;E{str(i+2)}=0)',
+            f'=OR(F{str(i+2)};G{str(i+2)})',
+            f'=IF(H{str(i+2)};IFERROR(VLOOKUP(A{str(i+2)};Errores!A:D;3;false);"No hubo error");"")'
+        ] for i in range(payment_id_count)
+    ]
+
+    sheets_api.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f'{tab_name}!B2:I' + str(payment_id_count+1),
+        valueInputOption='USER_ENTERED',
+        body={'values': values}
+    ).execute()
+
+def query_dtes(company_id, date_from, date_to):
+    return f"""
+    -- Búsqueda DTEs
+    select p.payment_id::text || '-' || d.issuer_identification as vlookup_id,
+        p.payment_id,
+        d.id                                                 as tready_id,
+        to_char(d.issued_at, 'yyyy-MM-dd HH:mi')             as fecha_emision,
+        d.tax_receipt_type                                   as tipo_dte,
+        d.issuer_identification                              as emisor_rut,
+        d.issuer_name                                        as emisor_nombre,
+        d.customer_identification                            as receptor_rut,
+        d.customer_name                                      as receptor_nombre,
+        d.total::int                                         as monto,
+        '''' || ((d.document::json) ->> 'number')::text      as folio,
+        (d.document::json) ->> 'url'                         as pdf
+    from dtes d
+            join payments p on (p.id = d.payment_id)
+    where p.company_id = {company_id}
+    and p.paid_at >= '{date_from}'
+    and p.paid_at < '{date_to}'
+    and status = 'completed'
+    and version = 'final'
+    order by p.payment_id desc; """
+
+def query_citas(company_id, date_from, date_to):
+    return f"""
+    -- Búsqueda Citas
+    select payment_id,
+        to_char(booking_start_time, 'yyyy-MM-dd HH:mi')             as booking_start_time,
+        location,
+        provider_id,
+        provider_name,
+        booking_id,
+        booking_price,
+        booking_status,
+        client_id,
+        client_name,
+        service_id,
+        service_name
+    from dwh.augmented_bookings
+    where company_id = {company_id}
+    and booking_start_time >= '{date_from}'
+    and booking_start_time < '{date_to}'
+    and payment_id is not null
+    order by booking_start_time desc;"""
+
+def connect_and_fetch_data(query, hostname, username, password, database):
+    conn = psycopg2.connect(host=hostname, user=username, password=password, dbname=database)
+    cur = conn.cursor() 
+    cur.execute(query)
+    rows = cur.fetchall()
+    headers = [desc[0] for desc in cur.description]
+    cur.close()
+    conn.close()
+
+    return [rows, headers]
+
+# Load the credentials from a JSON file
+with open('db_credentials.json') as f:
+    db_credentials = json.load(f)
+
+def load_data(tab, db_key, query):
+    print(f"Cargando '{tab}")
+    create_tab(tab)
+    rows, headers = connect_and_fetch_data(query, db_credentials[db_key]["host"], db_credentials[db_key]["user"], db_credentials[db_key]["pass"], db_credentials[db_key]["db"])
+    values = [headers] + rows
+    body = {
+        'values': values
+    }
+    result = sheets_api.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id, range=tab,
+        valueInputOption='USER_ENTERED', body=body).execute()
+
+def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_provider, iss, ruts):
     global spreadsheet_id
+    data = None
+
     spreadsheet_id = get_spreadsheet_id_from_url(url)
+
+    if company_id and date_from and date_to:
+        load_data("DTEs", "tready", query_dtes(company_id, date_from, date_to))
+        load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
+        
+    data = get_data_from_source_tab()
+
+    if cruce:
+        create_cruce_basico()
+
     if iss:
         unique_issuers_and_ruts('DTEs')
-
-    data = get_data_from_source_tab()
 
     if report_bhe:
         if data:
@@ -436,13 +573,17 @@ def main(url, fee, report_bhe, first_provider, iss, ruts):
         create_company_tabs(ruts)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process URL and fee.')
+    parser = argparse.ArgumentParser(description='Generador de reportes de Tready')
     parser.add_argument('--url', type=str, required=True, help='The URL to process.')
-    parser.add_argument('--fee', type=float, required=True, help='The fee to process.')
+    parser.add_argument('--cruce', action='store_true', help='Cruce general')
+    parser.add_argument('--fee', type=float, help='The fee to process.')
     parser.add_argument('--discover-issuers', action='store_true', help='Regenerate issuer list')
     parser.add_argument('--ruts-empresa', nargs='+', help='RUTs de empresa y Locations en formato RUT/Location')
     parser.add_argument('--report-bhe', action='store_true', help='Create report for providers')
     parser.add_argument('--first-provider', type=str, help='Start with this provider')
+    parser.add_argument('--company-id', type=str, help='Company ID')
+    parser.add_argument('--date-from', type=str, help='Extracción desde en formato yyyyMMdd')
+    parser.add_argument('--date-to', type=str, help='Extracción hasta (no inclusivo) en formato yyyyMMdd')
 
     args = parser.parse_args()
-    main(args.url, args.fee, args.report_bhe, args.first_provider, args.regenerate_list, args.ruts_empresa)
+    main(args.company_id, args.date_from, args.date_to, args.url, args.cruce, args.fee, args.report_bhe, args.first_provider, args.discover_issuers, args.ruts_empresa)
