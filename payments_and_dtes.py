@@ -235,7 +235,7 @@ def create_and_copy_rows_to_tabs(data, fee, first_provider):
             continue
 
         function1 = "=IF(A@@<>\"\"; CONCAT(A@@;CONCAT(\"-\";VLOOKUP(E@@;Emisores!$A$1:$B$100;2;FALSE)));\"\")"
-        function2 = "=IF(M@@<>\"\"; HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE));\"\")"
+        function2 = "=IF(M@@<>\"\"; IFERROR(HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE)); VLOOKUP(CONCAT(CONCAT(A@@;\"-\");E@@);Errores!A:F;6));\"\")"
         function3 = "=IF(M@@<>\"\"; LEN(VLOOKUP(M@@;DTEs!A:L;6;FALSE))-2;\"\")"
         function4 = "=IF(M@@<>\"\"; INT(LEFT(RIGHT(N@@;LEN(N@@)-O@@);5));\"\")"
         function5 = "=IF(M@@<>\"\"; VLOOKUP(M@@;DTEs!A:L;10;FALSE);\"\")"
@@ -437,7 +437,7 @@ def create_cruce_basico():
 
     sheets_api.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
-        range=f'{tab_name}!B1:I1',
+        range=f'{tab_name}!B1:J1',
         valueInputOption='USER_ENTERED',
         body={'values': [[
             'location', 
@@ -447,6 +447,7 @@ def create_cruce_basico():
             'Falta BHE',
             'Falta BA',
             'Falta DTE',
+            'Emisor',
             'Error'
         ]]}
     ).execute()
@@ -461,13 +462,14 @@ def create_cruce_basico():
             f'=C{str(i+2)}>D{str(i+2)}',
             f'=AND(C{str(i+2)}>0;E{str(i+2)}=0)',
             f'=OR(F{str(i+2)};G{str(i+2)})',
-            f'=IF(H{str(i+2)};IFERROR(VLOOKUP(A{str(i+2)};Errores!A:D;3;false);"No hubo error");"")'
+            f'=IF(H{str(i+2)};IFERROR(VLOOKUP(A{str(i+2)};Errores!B:F;4;false);"");"")',
+            f'=IF(H{str(i+2)};IFERROR(VLOOKUP(A{str(i+2)};Errores!B:F;5;false);"No hubo error");"")'
         ] for i in range(payment_id_count)
     ]
 
     sheets_api.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
-        range=f'{tab_name}!B2:I' + str(payment_id_count+1),
+        range=f'{tab_name}!B2:J' + str(payment_id_count+1),
         valueInputOption='USER_ENTERED',
         body={'values': values}
     ).execute()
@@ -518,6 +520,36 @@ def query_citas(company_id, date_from, date_to):
     and payment_id is not null
     order by booking_start_time desc;"""
 
+def query_errores(company_id, date_from, date_to):
+    return f"""
+    -- errores
+    with all_errors as (
+    select 
+        p.payment_id || '-' || d.issuer_name as vlookup_id,
+        p.payment_id,
+        d.issuer_identification,
+        d.issuer_name,
+        d.error ->> 'description' as error,
+        to_char(d.updated_at, 'yyyyMMdd HH:mi') as updated_at,
+        row_number() over (partition by p.payment_id order by d.updated_at desc) as rn
+    from dtes d
+            left join payments p on d.payment_id = p.id
+    where p.company_id = 45612
+    and p.paid_at >= '20230501'
+    and p.paid_at < '20230601'
+    and d.error is not null
+    order by 1, 4)
+    select 
+        vlookup_id,
+        payment_id,
+        updated_at,
+        issuer_identification,
+        issuer_name,
+        error
+    from all_errors
+    where rn = 1
+    order by 2, 3;"""
+
 def connect_and_fetch_data(query, hostname, username, password, database):
     conn = psycopg2.connect(host=hostname, user=username, password=password, dbname=database)
     cur = conn.cursor() 
@@ -534,7 +566,7 @@ with open('db_credentials.json') as f:
     db_credentials = json.load(f)
 
 def load_data(tab, db_key, query):
-    print(f"Cargando '{tab}")
+    print(f"Cargando '{tab}'")
     create_tab(tab)
     rows, headers = connect_and_fetch_data(query, db_credentials[db_key]["host"], db_credentials[db_key]["user"], db_credentials[db_key]["pass"], db_credentials[db_key]["db"])
     values = [headers] + rows
@@ -554,6 +586,7 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
     if company_id and date_from and date_to:
         load_data("DTEs", "tready", query_dtes(company_id, date_from, date_to))
         load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
+        load_data("Errores", "tready", query_errores(company_id, date_from, date_to))
         
     data = get_data_from_source_tab()
 
