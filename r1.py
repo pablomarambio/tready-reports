@@ -160,9 +160,6 @@ def apply_conditional_formatting(sheet_name, sheet_id, column_letter, row_count,
     except HttpError as error:
         print(f"An error occurred: {error}")
 
-
-
-
 def get_sheet_id(sheet_name):
     sheet_metadata = sheets_api.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
     sheets = sheet_metadata.get('sheets', '')
@@ -284,7 +281,7 @@ def find_column_height(tab_name, column):
         return len(values)
 
 def create_tab(tab_name, freeze_headers=True):
-    if tabs[tab_name]:
+    if tab_name in tabs:
         try:
             range_all = f'{tab_name}!A1:Z'
             sheets_api.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range=range_all, body={}).execute()
@@ -301,9 +298,8 @@ def create_tab(tab_name, freeze_headers=True):
     }
 
     try:
-        sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [create_tab_request]}).execute()
-        sheet_id = get_sheet_id(tab_name)
-        
+        x = sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [create_tab_request]}).execute()
+        sheet_id = x["replies"][0]["addSheet"]["properties"]["sheetId"]
         tabs[tab_name] = sheet_id
         if freeze_headers:
             freeze_request = {
@@ -600,7 +596,7 @@ def load_data(tab, db_key, query):
         spreadsheetId=spreadsheet_id, range=tab,
         valueInputOption='USER_ENTERED', body=body).execute()
 
-def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_provider, iss, ruts):
+def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_provider, ruts):
     global spreadsheet_id
     data = None
 
@@ -614,7 +610,10 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
         
     data = get_data_from_source_tab()
 
-    if cruce:
+    if (cruce or ruts or report_bhe) and not fee:
+        raise Exception("Se requiere indicar el fee del prestador con la opción -f o --fee")
+
+    if report_bhe or ruts or cruce:
         create_cruce_basico()
 
     if ruts:
@@ -640,4 +639,4 @@ if __name__ == '__main__':
     parser.add_argument('-dt', '--date-to',      type=str,                help='Extraer hasta (no inclusivo) en formato yyyyMMdd')
 
     args = parser.parse_args()
-    main(args.company_id, args.date_from, args.date_to, args.url, args.cruce, args.fee, args.report_bhe, args.first_provider, args.discover_issuers, args.ruts_empresa)
+    main(args.company_id, args.date_from, args.date_to, args.url, args.cruce, args.fee, args.report_bhe, args.skip_until, args.ruts_empresa)
