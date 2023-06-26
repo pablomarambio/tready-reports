@@ -326,7 +326,7 @@ def create_company_tabs(ruts):
         if not rut_and_location:
             continue
         rut, location = rut_and_location.split("/")
-        tab_name = f"Empresa-{rut}"
+        tab_name = f"{location}-{rut}"
         print(f"trabajando en '{rut}'")
 
         sheet_id = create_tab(tab_name)
