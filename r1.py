@@ -344,35 +344,22 @@ def create_company_tabs(ruts):
 
         last_non_empty_cell = find_column_height(tab_name, 'A')
 
-        sheets_api.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f'{tab_name}!B1:F1',
-            valueInputOption='USER_ENTERED',
-            body={'values': [[
-                'total', 
-                'id-vlookup',
-                'monto-boleta',
-                'dte'
-            ]]}
-        ).execute()
-
-
-        # Prepare the formula for each cell in column 'B'
-        values = [
+        arr = [['total', 'id-vlookup', 'monto-boleta', 'dte']]
+        
+        arr.extend([
             [
                 f'=SUMIF(Citas!A:A;A{str(i+2)};Citas!F:F)',
                 f'=CONCAT($A{str(i+2)};"-{rut}")',
                 f'=SUMIF(DTEs!$A:$A;C{str(i+2)};DTEs!$J:$J)',
                 f'=IFERROR(VLOOKUP(C{str(i+2)};DTEs!A:L;12;FALSE);VLOOKUP(CONCAT(CONCAT(A{str(i+2)};"-");\"{location}\");Errores!A:F;6))',
             ] for i in range(last_non_empty_cell-1)
-        ]
+        ])
 
-        # Insert the formulas starting from B2 until the last cell in column 'B' that has a corresponding value in column 'A'
         sheets_api.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f'{tab_name}!B2:F' + str(last_non_empty_cell+1),
+            range=f'{tab_name}!B1:F' + str(last_non_empty_cell+1),
             valueInputOption='USER_ENTERED',
-            body={'values': values}
+            body={'values': arr}
         ).execute()
 
     
