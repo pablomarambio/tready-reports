@@ -329,67 +329,21 @@ def create_company_tabs(ruts):
         tab_name = f"{location}-{rut}"
         print(f"trabajando en '{rut}'")
 
-        sheet_id = create_tab(tab_name)
-
-        update_cells_request = {
-            "requests": [
-                {
-                    "updateCells": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 0,
-                            "endRowIndex": 1,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": 1
-                        },
-                        "rows": [
-                            {
-                                "values": [
-                                    {
-                                        "userEnteredValue": {
-                                            "stringValue": "id-payment"
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        "fields": "userEnteredValue"
-                    }
-                },
-                {
-                    "updateCells": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 1,
-                            "endRowIndex": 2,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": 1
-                        },
-                        "rows": [
-                            {
-                                "values": [
-                                    {
-                                        "userEnteredValue": {
-                                            "formulaValue": f"=UNIQUE(FILTER(Citas!A2:A; Citas!C2:C=\"{location}\"))"
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        "fields": "userEnteredValue"
-                    }
-                }
-            ]
-        }
-
-        try:
-            sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=update_cells_request).execute()
-        except HttpError as error:
-            print(f"An error occurred: {error}")
+        create_tab(tab_name)
+        
+        # Copy payment_ids from Citas
+        sheets_api.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f'{tab_name}!A1:A2',
+            valueInputOption='USER_ENTERED',
+            body={'values': [
+                ['id-payment'], 
+                [f'=UNIQUE(FILTER(Citas!A2:A; Citas!C2:C="{location}"))']
+            ]}
+        ).execute()
 
         last_non_empty_cell = find_column_height(tab_name, 'A')
 
-        # Insert "ASD" as the header of the second column
         sheets_api.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=f'{tab_name}!B1:F1',
