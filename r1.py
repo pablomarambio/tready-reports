@@ -1,6 +1,8 @@
+from calendar import c
 import re
 import argparse
 import copy
+from unicodedata import decimal
 import psycopg2
 import pandas as pd
 import json
@@ -22,13 +24,17 @@ def get_spreadsheet_id_from_url(url):
 
 spreadsheet_id = "AAAAAAAAAA"
 
-SOURCE_TAB_NAME = 'Citas'
+citas = dtes = None
 
-def get_data_from_source_tab():
+def read_citas_and_dtes():
     try:
-        range_name = f'{SOURCE_TAB_NAME}!A:L'
+        global citas, dtes
+        range_name = 'Citas!A:L'
         result = sheets_api.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
-        return result.get('values', [])
+        citas = result.get('values', [])
+        range_name = 'DTEs!A:L'
+        result = sheets_api.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
+        dtes = result.get('values', [])
     except HttpError as error:
         print(f"An error occurred: {error}")
         return None
@@ -204,7 +210,8 @@ def unique_issuers_and_ruts(sheet_name):
         valueInputOption='RAW', body=body).execute()
 
     
-def create_and_copy_rows_to_tabs(data, fee, first_provider):
+def create_and_copy_rows_to_tabs(fee, first_provider):
+    data = citas
     data[0].append("id-vlookup1")
     data[0].append("id-boleta")
     data[0].append("largo-rut")
@@ -362,6 +369,43 @@ def create_company_tabs(ruts):
             body={'values': arr}
         ).execute()
 
+
+def create_catalogo_tabs():
+
+    tab_name = "Catalogo"
+    print(f"trabajando en '{tab_name}'")
+
+    create_tab(tab_name)
+    dc = copy.deepcopy(citas[1:])
+    for row in dc:
+        row.extend(['', '', ''])
+    dc.extend([
+        [d[1], '', '', '', '', '', '0', '', '', '', '', '', '', d[6], d[5], d[9]]
+     for d in dtes[1:]])
+    dc = sorted(dc, key=lambda row: row[0] + '-' + row[4], reverse=True)
+    arr = [['payment_id', 'local', 'cliente', 'fecha', 'proveedor', 'servicio', 'subtotal_ítem', '', 'emisor', 'rut_emisor', 'subtotal_dte']]
+
+    current_pid = None
+    current_item_total = 0
+    for r in range(len(dc)):
+        if(dc[r][0] != current_pid):
+            current_pid = dc[r][0]
+            arr.extend([[dc[r][0], dc[r][2], dc[r][9]]])
+            current_item_total = 0
+        if(dc[r][6] != '0'):
+            arr.extend([['', '', '', dc[r][1], dc[r][4], dc[r][11], dc[r][6]]])
+            current_item_total += float(dc[r][6])
+        else:
+            arr.extend([['', '', '', '', '', '', '', '', dc[r][13], dc[r][14], dc[r][15]]])
+        if(r+1 == len(dc) or dc[r+1][0]!= current_pid):
+            arr.extend([['', '', '', '', '', 'Total ítems', current_item_total]])
+
+    sheets_api.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f'{tab_name}!A1:K' + str(len(arr)),
+        valueInputOption='USER_ENTERED',
+        body={'values': arr}
+    ).execute()
     
 def create_cruce_basico():
 
@@ -538,9 +582,7 @@ def load_data(tab, db_key, query):
         valueInputOption='USER_ENTERED', body=body).execute()
 
 def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_provider, ruts):
-    global spreadsheet_id
-    data = None
-
+    global spreadsheet_id, citas
     spreadsheet_id = get_spreadsheet_id_from_url(url)
     load_existing_tabs()
 
@@ -549,7 +591,8 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
         load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
         load_data("Errores", "tready", query_errores(company_id, date_from, date_to))
         
-    data = get_data_from_source_tab()
+    read_citas_and_dtes()
+    create_catalogo_tabs()
 
     if (cruce or ruts or report_bhe) and not fee:
         raise Exception("Se requiere indicar el fee del prestador con la opción -f o --fee")
@@ -561,9 +604,9 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
         create_company_tabs(ruts)
 
     if report_bhe:
-        if data:
+        if citas:
             unique_issuers_and_ruts('DTEs')
-            create_and_copy_rows_to_tabs(copy.deepcopy(data), fee, first_provider)
+            create_and_copy_rows_to_tabs(fee, first_provider)
         else:
             print("No data found in the source tab.")
 
