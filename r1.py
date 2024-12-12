@@ -615,9 +615,9 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
     load_existing_tabs()
 
     if company_id and date_from and date_to:
-        #load_data("DTEs", "tready", query_dtes(company_id, date_from, date_to))
-        #load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
-        #load_data("Errores", "tready", query_errores(company_id, date_from, date_to))
+        load_data("DTEs", "tready", query_dtes(company_id, date_from, date_to))
+        load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
+        load_data("Errores", "tready", query_errores(company_id, date_from, date_to))
         load_data("Transacciones", "ap", query_transacciones(company_id, date_from, date_to))
         
     read_citas_and_dtes()
