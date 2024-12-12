@@ -219,6 +219,9 @@ def create_and_copy_rows_to_tabs(fee, first_provider):
     data[0].append("monto-boleta")
     data[0].append("monto-servicios")
     data[0].append("valor")
+    data[0].append("voucher pos")
+    data[0].append("propina pos")
+    data[0].append("participantes venta")
     unique_values = sorted(list(set(row[4] for row in data[1:])))
     
     process_all = (first_provider is None)
@@ -238,13 +241,16 @@ def create_and_copy_rows_to_tabs(fee, first_provider):
         if not filtered_rows:
             continue
 
-        function1 = "=IF(A@@<>\"\"; CONCAT(A@@;CONCAT(\"-\";VLOOKUP(E@@;Emisores!$A$1:$B$100;2;FALSE)));\"\")"
-        function2 = "=IF(M@@<>\"\"; IFERROR(HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE)); VLOOKUP(CONCAT(CONCAT(A@@;\"-\");E@@);Errores!A:F;6));\"\")"
-        function3 = "=IF(M@@<>\"\"; LEN(VLOOKUP(M@@;DTEs!A:L;6;FALSE))-2;\"\")"
-        function4 = "=IF(M@@<>\"\"; INT(LEFT(RIGHT(N@@;LEN(N@@)-O@@);5));\"\")"
-        function5 = "=IF(M@@<>\"\"; VLOOKUP(M@@;DTEs!A:L;10;FALSE);\"\")"
-        function6 = "=IF(M@@<>\"\"; CEILING(SUMIFS(G:G;A:A;A@@));\"\")"
-        function7 = "=IFERROR(Q@@/R@@;\"\")"
+        function01 = "=IF(A@@<>\"\"; CONCAT(A@@;CONCAT(\"-\";VLOOKUP(E@@;Emisores!$A$1:$B$100;2;FALSE)));\"\")"
+        function02 = "=IF(M@@<>\"\"; IFERROR(HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE)); VLOOKUP(CONCAT(CONCAT(A@@;\"-\");E@@);Errores!A:F;6));\"\")"
+        function03 = "=IF(M@@<>\"\"; LEN(VLOOKUP(M@@;DTEs!A:L;6;FALSE))-2;\"\")"
+        function04 = "=IF(M@@<>\"\"; INT(LEFT(RIGHT(N@@;LEN(N@@));5));\"\")"
+        function05 = "=IF(M@@<>\"\"; VLOOKUP(M@@;DTEs!A:L;10;FALSE);\"\")"
+        function06 = "=IF(M@@<>\"\"; CEILING(SUMIFS(G:G;A:A;A@@));\"\")"
+        function07 = "=IFERROR(Q@@/R@@;\"\")"
+        function08 = "=IFERROR(VLOOKUP(A@@;Transacciones!A:F;3;false);\"\")"
+        function09 = "=IFERROR(VLOOKUP(A@@;Transacciones!A:F;5;false);\"\")"
+        function10 = "=COUNTUNIQUEIFS(Citas!E:E;Citas!A:A;A@@)"
         ri = 2
         function1_column = 'M'
 
@@ -253,13 +259,16 @@ def create_and_copy_rows_to_tabs(fee, first_provider):
             while len(row) < (ord(function1_column) - ord('A')):
                 row.append('')
             # append functions
-            row.append(function1.replace("@@", str(ri)))
-            row.append(function2.replace("@@", str(ri)))
-            row.append(function3.replace("@@", str(ri)))
-            row.append(function4.replace("@@", str(ri)))
-            row.append(function5.replace("@@", str(ri)))
-            row.append(function6.replace("@@", str(ri)))
-            row.append(function7.replace("@@", str(ri)))
+            row.append(function01.replace("@@", str(ri)))
+            row.append(function02.replace("@@", str(ri)))
+            row.append(function03.replace("@@", str(ri)))
+            row.append(function04.replace("@@", str(ri)))
+            row.append(function05.replace("@@", str(ri)))
+            row.append(function06.replace("@@", str(ri)))
+            row.append(function07.replace("@@", str(ri)))
+            row.append(function08.replace("@@", str(ri)))
+            row.append(function09.replace("@@", str(ri)))
+            row.append(function10.replace("@@", str(ri)))
             ri = ri + 1
 
         # Update the range_name to cover the entire range being written
@@ -510,6 +519,25 @@ def query_citas(company_id, date_from, date_to):
     and payment_id is not null
     order by booking_start_time desc;"""
 
+def query_transacciones(company_id, date_from, date_to):
+    return f"""
+    select 
+        s.payment_id, 
+        t.id as transaction_id, 
+        t.external_reference, 
+        t.amount::int, 
+        t.tip::int,
+        to_char(p.payment_date, 'yyyy-MM-dd HH24:mi') as payment_date
+    from transactions t
+    left join payment_requests pr on t.payment_request_id = pr.id
+    left join sales s on pr.cart_id = s.cart_id
+    left join payments p on s.payment_id = p.id
+    where t.company_id = {company_id}
+    and t.paid_at >= '{date_from}'
+    and t.paid_at < '{date_to}'
+    and t.paymentable_id = 40
+    order by t.created_at desc;"""
+
 def query_errores(company_id, date_from, date_to):
     return f"""
     -- errores
@@ -587,9 +615,10 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
     load_existing_tabs()
 
     if company_id and date_from and date_to:
-        load_data("DTEs", "tready", query_dtes(company_id, date_from, date_to))
-        load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
-        load_data("Errores", "tready", query_errores(company_id, date_from, date_to))
+        #load_data("DTEs", "tready", query_dtes(company_id, date_from, date_to))
+        #load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
+        #load_data("Errores", "tready", query_errores(company_id, date_from, date_to))
+        load_data("Transacciones", "ap", query_transacciones(company_id, date_from, date_to))
         
     read_citas_and_dtes()
     create_catalogo_tabs()
