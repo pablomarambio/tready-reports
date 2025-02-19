@@ -242,7 +242,7 @@ def create_and_copy_rows_to_tabs(fee, first_provider):
             continue
 
         function01 = "=IF(A@@<>\"\"; CONCAT(A@@;CONCAT(\"-\";VLOOKUP(E@@;Emisores!$A$1:$B$100;2;FALSE)));\"\")"
-        function02 = "=IF(M@@<>\"\"; IFERROR(HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE)); VLOOKUP(CONCAT(CONCAT(A@@;\"-\");E@@);Errores!A:F;6));\"\")"
+        function02 = "=IF(M@@<>\"\"; IFERROR(HYPERLINK(VLOOKUP(M@@;DTEs!A:L;12;FALSE);VLOOKUP(M@@;DTEs!A:L;11;FALSE)); IFERROR(VLOOKUP(CONCAT(CONCAT(A@@;\"-\");E@@);Errores!A:F;6;FALSE);\"Sin DTE\"));\"\")"
         function03 = "=IF(M@@<>\"\"; LEN(VLOOKUP(M@@;DTEs!A:L;6;FALSE))-2;\"\")"
         function04 = "=IF(M@@<>\"\"; INT(LEFT(RIGHT(N@@;LEN(N@@));5));\"\")"
         function05 = "=IF(M@@<>\"\"; VLOOKUP(M@@;DTEs!A:L;10;FALSE);\"\")"
