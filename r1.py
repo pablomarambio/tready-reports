@@ -547,9 +547,9 @@ def query_errores(company_id, date_from, date_to):
         p.payment_id,
         d.issuer_identification,
         d.issuer_name,
-        d.error ->> 'description' as error,
+        case when d.status || '-' || d.version = 'error-final' then d.error ->> 'description' else null end as error,
         to_char(d.updated_at, 'yyyyMMdd HH:mi') as updated_at,
-        row_number() over (partition by p.payment_id order by d.updated_at desc) as rn
+        row_number() over (partition by p.payment_id, d.issuer_name order by d.updated_at desc) as rn
     from dtes d
             left join payments p on d.payment_id = p.id
     where p.company_id = {company_id}
