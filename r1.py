@@ -176,39 +176,6 @@ def get_sheet_id(sheet_name):
             break
     return sheet_id
 
-def unique_issuers_and_ruts(sheet_name):
-    range_name = f'{sheet_name}!F2:G'
-    result = sheets_api.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=range_name).execute()
-    rows = result.get('values', [])
-
-    # Process the data
-    unique_people = {}
-    for row in rows:
-        try:
-            rut, name = row
-        except ValueError as error:
-            print(f"{error} en fila {row}")
-            continue
-        if name not in unique_people:
-            unique_people[name] = rut
-    sorted_names = sorted(unique_people.keys())
-
-    # Create a new tab
-    new_sheet_title = 'Emisores'
-    create_tab(new_sheet_title, freeze_headers=False)
-
-    # Write the data to the new tab
-    new_range = f'{new_sheet_title}!A:B'
-    body = {
-        'range': new_range,
-        'majorDimension': 'ROWS',
-        'values': [[name, unique_people[name]] for name in sorted_names]
-    }
-    sheets_api.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id, range=new_range,
-        valueInputOption='RAW', body=body).execute()
-
     
 def create_and_copy_rows_to_tabs(fee, first_provider):
     data = citas
@@ -473,6 +440,38 @@ def create_cruce_basico():
         body={'values': values}
     ).execute()
 
+def query_issuers(company_id, date_from, date_to):
+    return f"""
+    -- Búsqueda Emisores
+    with real_ruts as (select p.company_id, d.issuer_identification as rut, d.issuer_name, count(1) as q
+                   from dtes d
+                            left join payments p on d.payment_id = p.id
+                   where p.company_id = {company_id}
+                     and p.paid_at >= '{date_from}'
+                     and p.paid_at < '{date_to}'
+                     and status = 'completed'
+                     and version = 'final'
+                   group by 1, 2, 3
+                   order by 4 desc),
+     raw_theoretical_ruts as (select company_id,
+                                     json_object_keys(params -> 'dtemite') AS rut,
+                                     params ->> 'name'                     as issuer_name,
+                                     0                                     as q
+                              from company_values
+                              where company_id = {company_id}
+                              union all
+                              select company_id, params ->> 'rut' as rut, params ->> 'name' as issuer_name, 0 as q
+                              from provider_values
+                              where company_id = {company_id}),
+     theoretical_ruts as (select *
+                          from raw_theoretical_ruts
+                          where rut is not null)
+select  
+        coalesce(r.issuer_name, t.issuer_name) as issuer_name, 
+        rut
+from real_ruts r
+         full outer join theoretical_ruts t using (company_id, rut);"""
+
 def query_dtes(company_id, date_from, date_to):
     return f"""
     -- Búsqueda DTEs
@@ -619,6 +618,7 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
         load_data("Citas", "dwh", query_citas(company_id, date_from, date_to))
         load_data("Errores", "tready", query_errores(company_id, date_from, date_to))
         load_data("Transacciones", "ap", query_transacciones(company_id, date_from, date_to))
+        load_data("Emisores", "tready", query_issuers(company_id, date_from, date_to))
         
     read_citas_and_dtes()
     create_catalogo_tabs()
@@ -634,7 +634,6 @@ def main(company_id, date_from, date_to, url, cruce, fee, report_bhe, first_prov
 
     if report_bhe:
         if citas:
-            unique_issuers_and_ruts('DTEs')
             create_and_copy_rows_to_tabs(fee, first_provider)
         else:
             print("No data found in the source tab.")
